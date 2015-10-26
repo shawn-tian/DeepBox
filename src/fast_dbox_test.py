@@ -23,6 +23,9 @@ import utils.blob
 import os
 import pdb
 import scipy.io as sio
+from os import listdir
+from os.path import isfile, join
+from PIL import Image
 
 def _get_image_blob(im):
     im_pyra = []
@@ -242,12 +245,45 @@ def demo_net_quick(net, num_boxes_vis):
     # timer
     _t = {'im_detect' : Timer(), 'misc' : Timer()}
 
-    filename = './data/demo/demo_boxes.mat'
-    demo_boxes = sio.loadmat(filename)['boxes']
-    for frame_num in range(4): 
-        im = cv2.imread('./data/demo/im{:d}.jpg'.format(frame_num))
-        boxes = demo_boxes[frame_num][0]
-        print 'Process image {:d},{:d} boxes'.format(frame_num,boxes.shape[0])
+    debug = False
+
+    if debug:
+        filename = './data/demo/demo_boxes.mat'
+        demo_boxes = sio.loadmat(filename)['boxes']
+        im_names = 'test'
+    else:
+        data_path = '/mnt/shangxuan/visenzeWork/proposalEval/boxes/'
+        bbs_mat = data_path + 'edgebox-val.mat'
+        demo_boxes = sio.loadmat(bbs_mat)['bbs']
+        mypath = '/mnt/distribute_env/data/detection/Objectness201510/JPEGImages/'
+        # onlyfiles = [ f for f in listdir(mypath) if isfile(join(mypath,f)) ]
+        im_names_mat = data_path + 'file_name_list.mat'
+        im_names = sio.loadmat(im_names_mat, squeeze_me=True, struct_as_record=False)['fnames']
+    
+    
+    for frame_num in range(len(im_names)): 
+        if debug:
+            im = cv2.imread('./data/demo/im{:d}.jpg'.format(frame_num))
+            boxes = demo_boxes[frame_num][0]
+        else:
+            #im = cv2.imread( mypath + im_names[frame_num].name, cv2.IMREAD_UNCHANGED)
+            im = Image.open(mypath + im_names[frame_num].name)
+            #print(im.format, im.size, im.mode)
+            im = np.array(im)
+            if im.shape[2] > 3:
+                im = im[:, :, 0:3]
+            # python pillow reads image into RGB format, need to convert to BGR
+            im = im[:, :, (2, 1, 0)] # 
+            #print im_names[frame_num].name
+            boxes = demo_boxes[0][frame_num][:, 0:4] - 1
+            #boxes = boxes.astype(np.float32)
+            # boxes.astype(float)
+            boxes[:, 2] = boxes[:, 0] + boxes[:, 2] - 1
+            boxes[:, 3] = boxes[:, 1] + boxes[:, 3] - 1
+            # print( type(im) )
+            # print im.shape
+
+        #print 'Process image {:d}, {:d} boxes'.format(frame_num,boxes.shape[0])
         _t['im_detect'].tic()
         
         #Pass the boxes through the net in batches 
@@ -255,7 +291,7 @@ def demo_net_quick(net, num_boxes_vis):
             rid = boxes.shape[0]/batch_size
         else:
             rid = boxes.shape[0]/batch_size+1
-
+        
         for j in xrange(rid):
             start_ind = batch_size*j
             end_ind = min(start_ind+batch_size,boxes.shape[0])
@@ -267,30 +303,36 @@ def demo_net_quick(net, num_boxes_vis):
                 scores = np.concatenate((scores, scores_[:,1]), axis=0)
         
         _t['im_detect'].toc()
-        print 'image {:d}/{:d} {:.3f}s'.format(frame_num+1,num_images,_t['im_detect'].average_time)
+        print 'Process image {:d}/{:d}, costs {:.3f}s'.format(frame_num, len(im_names),_t['im_detect'].average_time)
         indices = scores.argsort()[::-1]
         fboxes = boxes[indices,:]
+        #fboxes[:, 5] = scores
+        out_mat = data_path + 'Deepbox/' + im_names[frame_num].name[0:-4] + '.mat'
+        sio.savemat(out_mat, {'fboxes':fboxes})
 
         #Visualize top scoring boxes 
-        im = im[:, :, (2, 1, 0)] 
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.imshow(im)
-       # pdb.set_trace()
-        for i in xrange(num_boxes_vis):
-            bbox = fboxes[i,:]
-            score = scores[indices[i]]    
-            ax.add_patch(
-                plt.Rectangle((bbox[0], bbox[1]),
-                              bbox[2] - bbox[0],
-                              bbox[3] - bbox[1], fill=False,
-                              edgecolor='red', linewidth=3.5)
-                )
-            ax.text(bbox[0], bbox[1] - 2,
-                    'Objectness:{:.3f}'.format(score),
-                    bbox=dict(facecolor='blue', alpha=0.5),
-                    fontsize=14, color='white')
+       #  im = im[:, :, (2, 1, 0)] 
+       #  fig, ax = plt.subplots(figsize=(12, 8))
+       #  ax.imshow(im)
+       #  print im.shape
+       # # pdb.set_trace()
+       #  for i in xrange(num_boxes_vis):
+       #      bbox = fboxes[i,:]
+       #      score = scores[indices[i]]    
+       #      # print bbox
+       #      # print 'Box index: {:d}, score: {:f}'.format(indices[i], score)
+       #      ax.add_patch(
+       #          plt.Rectangle( (bbox[0], bbox[1]),
+       #                         bbox[2] - bbox[0],
+       #                         bbox[3] - bbox[1], fill=False,
+       #                        edgecolor='red', linewidth=3.5)
+       #          )
+       #      ax.text(bbox[0], bbox[1] - 2,
+       #              'Objectness:{:.3f}'.format(score),
+       #              bbox=dict(facecolor='blue', alpha=0.5),
+       #              fontsize=14, color='white')
 
-        ax.set_title('Fast DeepBox proposals on demo frame #{:d}'.format(frame_num),fontsize=14)
-        plt.axis('off')
-        plt.tight_layout()
-        plt.show()
+       #  ax.set_title('Fast DeepBox proposals on demo frame #{:d}'.format(frame_num),fontsize=14)
+       #  plt.axis('off')
+       #  plt.tight_layout()
+       #  plt.show()
